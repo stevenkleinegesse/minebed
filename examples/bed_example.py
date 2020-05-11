@@ -1,7 +1,3 @@
-# NOTE: THIS IS TEMPORARY ONLY!
-import sys
-sys.path.append('/Users/steven/phd/repos/minebed/src/')
-
 import numpy as np
 import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR

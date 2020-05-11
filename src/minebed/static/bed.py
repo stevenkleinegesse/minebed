@@ -2,9 +2,6 @@ import torch
 import torch.nn as nn
 from GPyOpt.methods import BayesianOptimization
 
-import sys
-sys.path.append('/Users/steven/phd/repos/minebed/')
-
 import minebed.mine as mm
 import minebed.methods as methods
 

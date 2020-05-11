@@ -1,12 +1,6 @@
-# NOTE: THIS IS TEMPORARY ONLY!
-import sys
-sys.path.append('/Users/steven/phd/repos/minebed/src/')
-
 import numpy as np
 import minebed.networks as mn
 import minebed.mine as mine
-import matplotlib.pyplot as plt
-
 
 def ma(a, window_size=100):
     return [np.mean(a[i:i+window_size]) for i in range(0,len(a)-window_size)]
@@ -31,9 +25,3 @@ mine_obj = mine.MINE(model, train_data, lr=5 * 1e-4)
 mine_obj.train(n_epoch=10000, batch_size=DATASIZE)
 
 print(np.mean(mine_obj.train_lb[-100:]))
-
-plt.plot(mine_obj.train_lb, alpha=0.6, c='steelblue')
-plt.plot(ma(mine_obj.train_lb), alpha=0.6, c='steelblue')
-plt.axhline(mi_an)
-
-plt.show()
