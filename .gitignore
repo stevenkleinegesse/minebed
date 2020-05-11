@@ -129,4 +129,4 @@ dmypy.json
 .pyre/
 
 # PyTorch stuff
-.pt
+*.pt
