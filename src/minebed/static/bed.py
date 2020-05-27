@@ -233,7 +233,9 @@ class GradientFreeBED(BED):
 
         return lb_final_ma
 
-    def train(self, BO_init_num=5, BO_max_num=20, verbosity=False):
+    def train(
+            self, bo_model=None, bo_space=None, bo_acquisition=None,
+            BO_init_num=5, BO_max_num=20, verbosity=False):
         """
         Uses Bayesian optimisation to find the optimal design. The objective
         function is the mutual information lower bound at a particular design,
@@ -241,6 +243,12 @@ class GradientFreeBED(BED):
 
         Parameters
         ----------
+        bo_model:
+
+        bo_space:
+
+        bo_acquisition:
+
         BO_init_num: int
             The number of initial BO evaluations used to initialise the GP.
             (default is 5)
@@ -254,6 +262,14 @@ class GradientFreeBED(BED):
 
         if verbosity:
             print('Initialize Probabilistic Model')
+
+        if bo_model and bo_space and bo_acquisition:
+            pass
+        elif all(v is None for v in [bo_model, bo_space, bo_acquisition]):
+            pass
+        else:
+            raise ValueError(
+                'Either all BO arguments or none need to be specified.')
 
         # Define GPyOpt Bayesian Optimization object
         self.bo_obj = BayesianOptimization(
@@ -310,6 +326,14 @@ class GradientFreeBED(BED):
 
         # train MINE model
         self.mine_obj_final.train(n_epoch, batch_size, bar=False)
+
+        # compute the moving average of all evaluations
+        lb_ma = self.mine_obj_final._ma(
+            self.mine_obj_final.train_lb,
+            window=self.ma_window)
+
+        # store data for analysis
+        self._store_data(lb_ma)
 
     def save(self, filename, extra_data={}):
         """
