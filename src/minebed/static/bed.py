@@ -235,7 +235,8 @@ class GradientFreeBED(BED):
 
     def train(
             self, bo_model=None, bo_space=None, bo_acquisition=None,
-            BO_init_num=5, BO_max_num=20, verbosity=False):
+            X_init=None, Y_init=None, BO_init_num=5, BO_max_num=20,
+            verbosity=False):
         """
         Uses Bayesian optimisation to find the optimal design. The objective
         function is the mutual information lower bound at a particular design,
@@ -264,7 +265,7 @@ class GradientFreeBED(BED):
             print('Initialize Probabilistic Model')
 
         if bo_model and bo_space and bo_acquisition:
-            pass
+            raise NotImplementedError('Custom BO model not yet implemented.')
         elif all(v is None for v in [bo_model, bo_space, bo_acquisition]):
             pass
         else:
@@ -277,7 +278,7 @@ class GradientFreeBED(BED):
             constraints=self.constraints, model_type='GP',
             acquisition_type='EI', normalize_Y=False,
             initial_design_numdata=BO_init_num, acquisition_jitter=0.01,
-            maximize=True)
+            maximize=True, X=X_init, Y=Y_init)
         # TODO: Implement a more modular approach with GPy model as input.
 
         if verbosity:
