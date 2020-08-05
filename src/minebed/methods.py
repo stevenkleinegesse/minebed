@@ -223,7 +223,7 @@ def posterior_density(
         objective function.
     params: np.ndarray of size (:, dim(parameter))
         Set of prior parameter samples.
-    params_densities: np.ndarray of size (:, dim(parameter))
+    params_densities: np.ndarray of size (len(params), 1)
         Prior densities of 'params'.
     y_obs: np.darray of size (1, dim(Y))
         Observed data obtained after the BED procedure.
