@@ -1,9 +1,13 @@
+from tqdm import tqdm as tqdm
+import numpy as np
+
 import torch
 import torch.nn as nn
 from GPyOpt.methods import BayesianOptimization
 
 import minebed.mine as mm
 import minebed.methods as methods
+import minebed.lower_bounds as lower_bounds
 
 
 class BED:
@@ -91,7 +95,7 @@ class GradientFreeBED(BED):
     batch_size: int
         The batch size used to train a model during a BO evaluation.
     ma_window: int
-        The moving average window size used to obtain a less noisy estiamte of
+        The moving average window size used to obtain a less noisy estimate of
         the loss function after training a model.
     domain: list of dictionaries
         Specifications of the domain of each design variable.
@@ -372,17 +376,233 @@ class GradientFreeBED(BED):
 
 class GradientBasedBED(BED):
 
+    """
+    Performs mutual information neural estimation for Bayesian experimental
+    design (MINEBED) for an implicit model where we can compute or approximate
+    gradients of the sampling path with respect to designs. It uses SGD on the
+    neural network parameters and on the experimental design to find the
+    optimal design.
+
+    Attributes
+    ----------
+    model: torch.nn.Module (or child class) object
+        A parametrised neural network that is trained to compute a lower bound
+        on the mutual information between two random variables.
+    optimizer: torch.optim object
+        The optimiser used to learn the neural network parameters.
+    optimizer_design: torch.optim object
+        The optimiser used to learn the experimental designs.
+    scheduler: torch.optim.lr_scheduler object
+        The learning rate scheduler used in conjunction with the optimizer.
+    scheduler_design: torch.optim.lr_scheduler object
+        The learning rate scheduler used in conjunction with the optimizer.
+    simulator: function
+        Simulator function for the implicit simulator model that is studied.
+    prior: np.ndarray
+        Samples from the prior distribution used to simulate synthetic data.
+    LB_type: str
+        The type of mutual information lower bound that is maximised.
+    n_epoch: int
+        The number of epochs used to train the model.
+    batch_size: int
+        The batch size used to train the model.
+    design_bounds: list
+        List of lower and upper bound for all design dimensions.
+
+    Methods
+    -------
+    train:
+        Runs the main Bayesian experimental design procedure to find the
+        optimal design.
+    save:
+        Saves some essential data.
+    """
+
     def __init__(
-            self, model, optimizer, scheduler, simulator, prior,
-            LB_type='NWJ'):
+            self, model, optimizer, optimizer_design, scheduler,
+            scheduler_design, simulator, prior, n_epoch, batch_size,
+            design_bounds, LB_type='NWJ', device=torch.device('cpu')):
+        """
+        Parameters
+        ----------
+        model: torch.nn.Module (or child class) object
+            A parametrised neural network that is trained to compute a lower
+            bound on the mutual information between two random variables.
+        optimizer: torch.optim object
+            The optimiser used to learn the neural network parameters.
+        optimizer_design: torch.optim object
+            The optimiser used to learn the experimental designs.
+        scheduler: torch.optim.lr_scheduler object
+            The learning rate scheduler used in conjunction with the optimizer.
+        scheduler_design: torch.optim.lr_scheduler object
+            The learning rate scheduler used in conjunction with the optimizer.
+        simulator: function
+            Simulator function for the implicit simulator model under study. It
+            should take a design d, an array of prior samples and the relevant
+            torch.deviceas input, i.e. data = simulator(d, prior, device),
+            where the shape of data should be (:, dim(y)).
+        prior: np.ndarray of size (:, dim(theta))
+            Samples from the prior distribution used to simulate data.
+        LB_type: str
+            The type of mutual information lower bound that is maximised.
+            (default is 'NWJ', also known as MINE-f)
+        n_epoch: int
+            The number of epochs used to train a model during a BO evaluation.
+        batch_size: int
+            The batch size used to train a model during a BO evaluation.
+        design_bounds: list
+            List of lower and upper bound for all design dimensions, of the
+            form [lower, upper].
+        device: torch.device
+            Device on which to run operations.
+            (default is on a CPU)
+
+        Note that the simulator function needs to return (data, gradients),
+        where the gradients of the data are with respect to experimental
+        designs. Ways of approximating these gradients rather than providing
+        them are currently not implemented.
+        """
 
         super(GradientBasedBED, self).__init__(
             model, optimizer, scheduler, simulator, prior, LB_type)
 
-        raise NotImplementedError("This class has not been included yet.")
+        # optimizers
+        self.optimizer_design = optimizer_design
+        self.scheduler_design = scheduler_design
 
-    def train(self):
-        pass
+        # nn parameters
+        self.n_epoch = n_epoch
+        self.batch_size = batch_size
+        self.data_size = len(self.prior)
 
-    def save(self, filename):
-        pass
+        # bounds of the design variable
+        self.design_bounds = design_bounds
+
+        # device to run computations on
+        self.device = device
+
+        if LB_type == 'NWJ':
+            self.loss_function = lower_bounds.minef_loss
+            self.grad_function = lower_bounds.minef_gradients
+        else:
+            raise NotImplementedError
+
+    def _get_batch(self, x, y, ygrads, method='random'):
+
+        # compute indeces
+        idx = np.random.choice(
+            range(len(x)), size=self.batch_size, replace=False)
+
+        return x[idx], y[idx], ygrads[idx]
+
+    def train(self, d):
+        """
+        Uses SGD to train a neural network to find the optimal design. The loss
+        function is a parametrised lower bound and depends on both the network
+        parameters and the designs..
+
+        Parameters
+        ----------
+        d: torch.tensor
+        BO_max_num: int
+            The maximum number of BO evaluations after the initialisation.
+            (default is 20)
+        verbosity: boolean
+            Turn off/on output to the command line.
+            (default is False)
+        """
+        
+        # put design onto the device
+        d.to(self.device)
+
+        # prepare Tensor containers to save data of designs
+        self.designs = torch.empty(
+            (self.n_epoch + 1, d.shape[0], 1),
+            dtype=torch.float, device=self.device)
+        self.designs[0] = d.clone().detach()  # save first design to container
+
+        # Prepare Tensor containers to save data of MI + init counter
+        self.mutual = torch.empty(
+            self.n_epoch,
+            dtype=torch.float, device=self.device)
+        entry = 0
+
+        for epoch in tqdm(range(self.n_epoch), leave=True, disable=False):
+
+            # simulate data in full
+            y_full, ygrads_full = self.simulator(d, self.prior, self.device)
+
+            for b in range(int(self.data_size / self.batch_size)):
+
+                # get batch samples
+                xs, ys, ygrads = self._get_batch(
+                    self.prior, y_full, ygrads_full)
+
+                # compute loss
+                loss = self.loss_function(xs, ys, self.model, self.device)
+
+                # Zero grad the NN optimizer
+                self.optimizer.zero_grad()
+
+                # Back-Propagation
+                loss.backward()
+
+                # Perform opt steps for NN
+                self.optimizer.step()  # NN params
+
+                # save a few things to lists
+                self.mutual[entry] = -loss.clone().detach()
+                entry += 1
+
+            # Perform opt steps for Design
+            self.optimizer_design.zero_grad()
+            d.grad = self.grad_function(
+                self.prior, y_full, ygrads_full, self.model, self.device)
+            self.optimizer_design.step()  # Designs
+
+            # LR scheduler step for psi and designs
+            self.scheduler.step()
+            self.scheduler_design.step()
+
+            # Clamp design if beyond boundaries
+            with torch.no_grad():
+                d.clamp_(self.design_bounds[0], self.design_bounds[1])
+
+            # Save designs to list
+            self.designs[epoch + 1] = d.clone().detach()
+
+        # Move containers to CPU and convert to Numpy Arrays
+        self.mutual = self.mutual.cpu().data.numpy()
+        self.designs = self.designs.cpu().data.numpy()
+
+    def save(self, filename, extra_data={}):
+        """
+        Saves some essential data, such as the final model state, optimizer and
+        scheduler state, the training loss and the experimental designs.
+
+        Parameters
+        ----------
+        filename: str
+            Location and name of file to be saved.
+        extra_data: dict
+            Dictionary of extra files that should be saved.
+            (default is an empty dict {})
+        """
+
+        # put together internal data
+        internal_data = {
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_psi_state_dict': self.optimizer.state_dict(),
+            'optimizer_design_state_dict': self.optimizer_design.state_dict(),
+            'scheduler_psi_state_dict': self.scheduler.state_dict(),
+            'scheduler_design_state_dict': self.scheduler_design.state_dict(),
+            'batch_size': self.batch_size,
+            'prior_samples': self.prior,
+            'mi': self.mutual,
+            'designs': self.designs}
+
+        # add external data
+        data = dict(internal_data, **extra_data)
+
+        # save as a binary file
+        torch.save(data, '{}.pt'.format(filename))
