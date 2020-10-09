@@ -64,7 +64,7 @@ H = 10
 
 # Sizes
 DATASIZE = 10000
-N_EPOCHS = 10000
+N_EPOCHS = 20000
 BATCHSIZE = DATASIZE  # no batches works well
 
 # Optimisation Params: Psi
@@ -73,7 +73,7 @@ STEP_PSI = 1000
 GAMMA_PSI = 1.0  # this would require fine-tuning
 
 # Optimisation Params: Designs
-LR_D = 1e-1
+LR_D = 1e-2
 LR_D_init = LR_D
 STEP_D = 1000
 GAMMA_D = 1.0  # this would require fine-tuning

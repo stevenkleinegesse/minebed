@@ -522,6 +522,9 @@ class GradientBasedBED(BED):
         self.designs[0] = d.clone().detach()  # save first design to container
 
         # Prepare Tensor containers to save data of MI + init counter
+        self.grads = torch.empty(
+            (self.n_epoch, d.shape[0], 1),
+            dtype=torch.float, device=self.device)
         self.mutual = torch.empty(
             self.n_epoch,
             dtype=torch.float, device=self.device)
@@ -543,6 +546,7 @@ class GradientBasedBED(BED):
 
                 # Zero grad the NN optimizer
                 self.optimizer.zero_grad()
+                self.optimizer_design.zero_grad()
 
                 # Back-Propagation
                 loss.backward()
@@ -570,10 +574,12 @@ class GradientBasedBED(BED):
 
             # Save designs to list
             self.designs[epoch + 1] = d.clone().detach()
+            self.grads[epoch] = d.grad.clone().detach()
 
         # Move containers to CPU and convert to Numpy Arrays
         self.mutual = self.mutual.cpu().data.numpy()
         self.designs = self.designs.cpu().data.numpy()
+        self.grads = self.grads.cpu().data.numpy()
 
     def save(self, filename, extra_data={}):
         """
@@ -599,7 +605,8 @@ class GradientBasedBED(BED):
             'batch_size': self.batch_size,
             'prior_samples': self.prior,
             'mi': self.mutual,
-            'designs': self.designs}
+            'designs': self.designs,
+            'gradients': self.grads}
 
         # add external data
         data = dict(internal_data, **extra_data)
