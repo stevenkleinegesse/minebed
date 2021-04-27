@@ -22,7 +22,7 @@ def sim_linear_torch(d, prior, device):
     # sample random gamma noise
     n_g = gamma.Gamma(
         torch.tensor([2.0], device=device),
-        torch.tensor([2.0], device=device)).sample(
+        torch.tensor([1 / 2.0], device=device)).sample(
             sample_shape=(len(d), len(prior))).reshape(len(d), len(prior))
 
     # perform forward pass
